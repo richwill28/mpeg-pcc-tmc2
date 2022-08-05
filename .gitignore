@@ -34,7 +34,7 @@
 # Cmake
 /mvsc/
 /build/
-/bin/
+# /bin/
 /lib/
 !dependencies/tbb/build/
 /dependencies/papi
