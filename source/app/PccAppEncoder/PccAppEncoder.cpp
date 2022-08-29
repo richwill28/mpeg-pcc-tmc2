@@ -1009,6 +1009,15 @@ bool parseParameters( int                   argc,
   return true;
 }
 
+/**
+ * @brief Compresses point cloud video.
+ * 
+ * @param encoderParams The encoder parameters.
+ * @param metricsParams The metrics parameters.
+ * @param clock A wrapper to measures elapsed user time.
+ * @return 0 if checksum is true,
+ * @return -1 otherwise.
+ */
 int compressVideo( const PCCEncoderParameters& encoderParams,
                    const PCCMetricsParameters& metricsParams,
                    StopwatchUserTime&          clock ) {
@@ -1035,13 +1044,15 @@ int compressVideo( const PCCEncoderParameters& encoderParams,
   // Place to get/set default values for gof metadata enabled flags (in sequence level).
   while ( startFrameNumber < endFrameNumber0 ) {
     size_t     endFrameNumber = min( startFrameNumber + groupOfFramesSize0, endFrameNumber0 );
-    PCCContext context;
+    PCCContext context; // used for context handling
     context.setBitstreamStat( bitstreamStat );
     context.addV3CParameterSet( contextIndex );
     context.setActiveVpsId( contextIndex );
-    PCCGroupOfFrames sources;
-    PCCGroupOfFrames reconstructs;
+    PCCGroupOfFrames sources; // input point cloud
+    PCCGroupOfFrames reconstructs; // reconstruced point cloud will be stored here
     clock.start();
+
+    // Load input point cloud from the specified path
     if ( !sources.load( encoderParams.uncompressedDataPath_, startFrameNumber, endFrameNumber,
                         encoderParams.colorTransform_, false, encoderParams.nbThread_ ) ) {
       return -1;
@@ -1052,7 +1063,9 @@ int compressVideo( const PCCEncoderParameters& encoderParams,
     }
     std::cout << "Compressing " << contextIndex << " frames " << startFrameNumber << " -> " << endFrameNumber << "..."
               << std::endl;
+    // Encoding of point cloud starts here
     int                ret = encoder.encode( sources, context, reconstructs );
+    // Encoding of point cloud ends here
     PCCBitstreamWriter bitstreamWriter;
 #ifdef BITSTREAM_TRACE
     bitstreamWriter.setLogger( logger );
@@ -1117,20 +1130,29 @@ int compressVideo( const PCCEncoderParameters& encoderParams,
 int main( int argc, char* argv[] ) {
   std::cout << "PccAppEncoder v" << TMC2_VERSION_MAJOR << "." << TMC2_VERSION_MINOR << std::endl << std::endl;
 
+  // Initializes default encoder and metrics parameters
   PCCEncoderParameters encoderParams;
   PCCMetricsParameters metricsParams;
+
+  // Parses user-specified options and set the parameters
   if ( !parseParameters( argc, argv, encoderParams, metricsParams ) ) { return -1; }
+
+// For multithreading purpose
 #if defined( ENABLE_TBB )
   if ( encoderParams.nbThread_ > 0 ) { tbb::task_scheduler_init init( static_cast<int>( encoderParams.nbThread_ ) ); }
 #endif
+
   // Timers to count elapsed wall/user time
   pcc::chrono::Stopwatch<std::chrono::steady_clock> clockWall;
   pcc::chrono::StopwatchUserTime                    clockUser;
 
   clockWall.start();
+  // Compression starts here
   int ret = compressVideo( encoderParams, metricsParams, clockUser );
+  // Compression ends here
   clockWall.stop();
 
+  // Prints processing times and memory usage
   using namespace std::chrono;
   using ms            = milliseconds;
   auto totalWall      = duration_cast<ms>( clockWall.count() ).count();
