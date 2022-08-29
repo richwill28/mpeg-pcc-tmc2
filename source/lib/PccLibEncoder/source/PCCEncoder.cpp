@@ -49,6 +49,15 @@
 #include <tbb/tbb.h>
 #endif
 
+// FOR DEBUGGING PURPOSE (TO BE REMOVED)
+#define ANSI_COLOR_RED      "\x1b[31m"
+#define ANSI_COLOR_GREEN    "\x1b[32m"
+#define ANSI_COLOR_YELLOW   "\x1b[33m"
+#define ANSI_COLOR_PURPLE   "\x1b[34m"
+#define ANSI_COLOR_MAGENTA  "\x1b[35m"
+#define ANSI_COLOR_CYAN     "\x1b[36m"
+#define ANSI_COLOR_RESET    "\x1b[0m"
+
 using namespace std;
 using namespace pcc;
 
@@ -100,13 +109,17 @@ int PCCEncoder::encode( const PCCGroupOfFrames& sources, PCCContext& context, PC
     frameContext.setLog2PatchQuantizerSizeY( params_.log2QuantizerSizeY_ );
   }
 
-  // Segmentation
+  // Segmentation (Patch Generation)
+  // TODO: Try downsampling some of the patches before packing to achieve
+  //       selective compression
+  // Note: Apparently we could only downsample the 3 largest patches, check
+  //       whether this is true or not. If it is, we might want to modify it
   generateSegments( sources, context );
 
   // Init context and tiles
   params_.initializeContext( context );
 
-  // Segment Placement
+  // Segment Placement (Patch Packing)
   placeSegments( sources, context );
 
   // updatePartitionInformation
@@ -129,15 +142,19 @@ int PCCEncoder::encode( const PCCGroupOfFrames& sources, PCCContext& context, PC
     asps.setFrameWidth( sps.getFrameWidth( atlasIndex ) );
   }
 
-  // GENERATE OCCUPANCY MAP
+  // Generates occupancy maps
+  // Only the data structures are generated here, not the images
   generateOccupancyMap( context, true );
 
   // ENCODE OCCUPANCY MAP
   TRACE_PICTURE( "Occupancy\n" );
   TRACE_PICTURE( "MapIdx = 0, AuxiliaryVideoFlag = 0\n" );
   auto& videoBitstream = context.createVideoBitstream( VIDEO_OCCUPANCY );
+  // The image for each occupancy map is generated here
   generateOccupancyMapVideo( sources, context );
   auto& videoOccupancyMap = context.getVideoOccupancyMap();
+  // Compression happens here
+  // TODO: Modify the compression such that different resolutions can be applied based on projection plane
   videoEncoder.compress( videoOccupancyMap,                         // video
                          path.str(),                                // path
                          params_.occupancyMapQP_,                   // QP
@@ -739,6 +756,51 @@ void PCCEncoder::printMap( std::vector<bool> img, const size_t sizeU, const size
   std::cout << std::endl;
 }
 
+/**
+ * @brief Prints the occupancy map of a frame.
+ * 
+ * @param img The occupancy map data structure.
+ * @param sizeU The width of the occupancy map.
+ * @param sizeV The height of the occupancy map.
+ */
+void PCCEncoder::printMapViewport( std::vector<int> img, const size_t sizeU, const size_t sizeV ) {
+  std::cout << std::endl;
+  std::cout << "PrintMap size = " << sizeU << " x " << sizeV << std::endl;
+  for ( size_t v = 0; v < sizeV; ++v ) {
+    for ( size_t u = 0; u < sizeU; ++u ) {
+      // Assumes there are 6 projection planes
+      switch (img[v * sizeU + u]) {
+        case -1:
+          std::cout << ".";
+          break;
+        case 0:
+          std::cout << ANSI_COLOR_RED << "X" << ANSI_COLOR_RESET;
+          break;
+        case 1:
+          std::cout << ANSI_COLOR_GREEN << "X" << ANSI_COLOR_RESET;
+          break;
+        case 2:
+          std::cout << ANSI_COLOR_YELLOW << "X" << ANSI_COLOR_RESET;
+          break;
+        case 3:
+          std::cout << ANSI_COLOR_PURPLE << "X" << ANSI_COLOR_RESET;
+          break;
+        case 4:
+          std::cout << ANSI_COLOR_MAGENTA << "X" << ANSI_COLOR_RESET;
+          break;
+        case 5:
+          std::cout << ANSI_COLOR_CYAN << "X" << ANSI_COLOR_RESET;
+          break;
+        default:
+          // Just in case if the projection plane is more than 6
+          std::cout << "Y";
+      }
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+}
+
 void PCCEncoder::printMapTetris( std::vector<bool> img,
                                  const size_t      sizeU,
                                  const size_t      sizeV,
@@ -790,11 +852,20 @@ void PCCEncoder::preFilterOccupancyMap( PCCImageOccupancyMap& image, size_t kwid
   }
 }
 
+/**
+ * @brief Generates an occupancy map (image) for each frame.
+ * 
+ * @param sources ?
+ * @param context The frames are stored inside this context.
+ * @return true if every image is generated successfully,
+ * @return false otherwise.
+ */
 bool PCCEncoder::generateOccupancyMapVideo( const PCCGroupOfFrames& sources, PCCContext& context ) {
   auto& videoOccupancyMap = context.getVideoOccupancyMap();
   bool  ret               = true;
   videoOccupancyMap.resize( sources.getFrameCount() );
   for ( size_t f = 0; f < sources.getFrameCount(); ++f ) {
+    // Generates an occupancy map image for each frame
     auto&                 contextFrame = context.getFrames()[f];
     PCCImageOccupancyMap& videoFrame   = videoOccupancyMap.getFrame( f );
     ret &= generateOccupancyMapVideo( contextFrame.getAtlasFrameWidth(), contextFrame.getAtlasFrameHeight(),
@@ -803,10 +874,20 @@ bool PCCEncoder::generateOccupancyMapVideo( const PCCGroupOfFrames& sources, PCC
   return ret;
 }
 
+/**
+ * @brief Generates an occupancy map (image) given the data structure.
+ * 
+ * @param imageWidth The width of the image.
+ * @param imageHeight The height of the image.
+ * @param occupancyMap The data structure of the occupancy map.
+ * @param videoFrameOccupancyMap ?
+ * @return true
+ */
 bool PCCEncoder::generateOccupancyMapVideo( const size_t           imageWidth,
                                             const size_t           imageHeight,
                                             std::vector<uint32_t>& occupancyMap,
                                             PCCImageOccupancyMap&  videoFrameOccupancyMap ) {
+  // TODO: Modify this function such that different colors can be produced based on viewpoints
   const size_t blockSize0  = params_.occupancyResolution_ / params_.occupancyPrecision_;
   const size_t pointCount0 = blockSize0 * blockSize0;
   vector<bool> block0;
@@ -2472,6 +2553,245 @@ void PCCEncoder::packFlexible( PCCFrameContext& tile,
             << width << " x " << height << std::endl;
 }
 
+void PCCEncoder::packViewport( PCCFrameContext& tile,
+                               int              packingStrategy,
+                               size_t           presetWidth,
+                               size_t           presetHeight,
+                               int              safeguard,
+                               bool             enablePointCloudPartitioning ) {
+  auto  width   = tile.getWidth();
+  auto& height  = tile.getHeight();
+  auto& patches = tile.getPatches();
+
+  // set no matched patches, since this function does not take into account the previous frame
+  tile.setNumMatchedPatches( 0 );
+
+  // If there are no patches, set the width and height of the occupancy map to their preset values
+  if ( patches.empty() ) {
+    if ( tile.getNumberOfRawPointsPatches() == 0 ) { return; }
+    if ( tile.getUseRawPointsSeparateVideo() ) { return; }
+    std::vector<bool> occupancyMap;
+    size_t            occupancySizeU = presetWidth / params_.occupancyResolution_;
+    size_t            occupancySizeV = presetHeight / params_.occupancyResolution_;
+    if ( presetWidth == 0 || presetHeight == 0 ) {
+      auto& rawPointsPatch = tile.getRawPointsPatch( 0 );
+      auto  rawPointsPatchBlocks =
+          static_cast<size_t>( ceil( double( rawPointsPatch.getNumberOfRawPoints() * 3 ) /
+                                     ( params_.occupancyResolution_ * params_.occupancyResolution_ ) ) );
+      if ( presetWidth == 0 ) occupancySizeU = params_.minimumImageWidth_ / params_.occupancyResolution_;
+      if ( presetHeight == 0 )
+        occupancySizeV = static_cast<size_t>( ceil( double( rawPointsPatchBlocks ) / occupancySizeU ) );
+    }
+    occupancyMap.resize( occupancySizeU * occupancySizeV );
+    if ( tile.getNumberOfRawPointsPatches() > 0 && !tile.getUseRawPointsSeparateVideo() ) {
+      packRawPointsPatch( tile, occupancyMap, width, height, occupancySizeU, occupancySizeV, 0 );
+    } else {
+      if ( g_printDetailedInfo ) { printMap( occupancyMap, occupancySizeU, occupancySizeV ); }
+    }
+    if ( params_.enhancedOccupancyMapCode_ && !tile.getUseRawPointsSeparateVideo() ) {
+      packEOMAttributePointsPatch( tile, occupancyMap, width, height, occupancySizeU, occupancySizeV, 0 );
+    }
+    if ( g_printDetailedInfo ) { printMap( occupancyMap, occupancySizeU, occupancySizeV ); }
+    bool emptyTile = false;
+    if ( height == 0 ) {
+      emptyTile = true;
+      height    = 64;
+    }
+    std::cout << "frame " << tile.getFrameIndex() << " tile " << tile.getTileIndex()
+              << " packFlexible(patchEmpty): actualImageSize " << width << " x " << height;
+    if ( emptyTile )
+      std::cout << " height adjusted" << std::endl;
+    else
+      std::cout << std::endl;
+    return;
+  }
+
+  // Sorts the patches from the largest dimension
+  // if ( packingStrategy == 0 ) {
+  //   std::sort( patches.begin(), patches.end() );
+  // } else {
+  //   std::sort( patches.begin(), patches.end(), []( PCCPatch& a, PCCPatch& b ) { return a.gt( b ); } );
+  // }
+
+  // Sorts the patches by projection plane, with dimension as the tie breaker
+  std::sort( patches.begin(), patches.end(), []( PCCPatch& a, PCCPatch& b ) { return a.getViewId() == b.getViewId() ? a.gt( b ) : a.getViewId() < b.getViewId(); } );
+
+  // For debugging purpose (TO BE REMOVED)
+  // std::cout << ANSI_COLOR_RED;
+  // for (auto& patch : patches) {
+  //   std::cout << patch.getViewId() << std::endl;
+  // }
+  // std::cout << ANSI_COLOR_RESET;
+
+  if ( g_printDetailedInfo ) {
+    std::cout << "Patch order:" << std::endl;
+    for ( auto& patch : patches ) {
+      std::cout << "Patch[" << patch.getIndex() << "]=(" << patch.getSizeU0() << "," << patch.getSizeV0() << ")"
+                << std::endl;
+    }
+  }
+
+  // Set the width of the occupancy map to its preset width (accounting for resolution)
+  size_t occupancySizeU = presetWidth / params_.occupancyResolution_;
+  // If the largest patch is wider than the occupancy map, update the width of the occupancy map
+  for ( auto& patch : patches ) { occupancySizeU = (std::max)( occupancySizeU, patch.getSizeU0() + 1 ); }
+
+  // Initially, set the height of the occupancy map to the height of the first patch
+  // This height will be updated accordingly when more patches are packed to the occupancy map
+  size_t occupancySizeV = (std::max)( patches[0].getSizeV0(), patches[0].getSizeU0() );
+
+  // The number of region of interests
+  int numROIs     = params_.numROIs_;
+  // What is this?
+  int numTilesHor = params_.numTilesHor_;
+  // The width of the tile
+  int tileWidth   = occupancySizeU / numTilesHor;
+  // The height of the tile
+  int tileHeight  = int( tileWidth * params_.tileHeightToWidthRatio_ );
+
+  // For debugging purpose (TO BE REMOVED)
+  // std::cout << ANSI_COLOR_RED;
+  // std::cout << "numROIs = " << numROIs << std::endl;
+  // std::cout << "numTilesHor = " << numTilesHor << std::endl;
+  // std::cout << "tileWidth = " << tileWidth << std::endl;
+  // std::cout << "tileHeight = " << tileHeight << std::endl;
+  // std::cout << ANSI_COLOR_RESET;
+
+  // Ignore this for now
+  if ( params_.enablePointCloudPartitioning_ )
+    std::cout << "frame " << tile.getFrameIndex() << " tilesize: " << tileWidth << "x" << tileHeight << std::endl;
+
+  occupancySizeV                    = ( occupancySizeV >= tileHeight ) ? occupancySizeV : tileHeight;
+  height                            = occupancySizeV * params_.occupancyResolution_;
+
+  // What is this?
+  size_t            maxOccupancyRow = 0;
+  // The number of orientation for the patch (2 by default)
+  int               numOrientations = ( packingStrategy == 0 ) ? 1 : ( params_.useEightOrientations_ ? 8 : 2 );
+
+  // For debugging purpose (TO BE REMOVED)
+  // std::cout << ANSI_COLOR_RED;
+  // std::cout << "occupancySizeV = " << occupancySizeV << std::endl;
+  // std::cout << "numOrientations = " << numOrientations << std::endl;
+  // std::cout << ANSI_COLOR_RESET;
+
+  std::vector<bool> occupancyMap;
+  occupancyMap.resize( occupancySizeU * occupancySizeV, false );
+
+  // This will be used for printing the map for debugging
+  std::vector<int> occupancyMapViewport;
+  occupancyMapViewport.resize( occupancySizeU * occupancySizeV, -1 );
+
+  // Packs each patch iteratively
+  for ( auto& patch : patches ) {
+    assert( patch.getSizeU0() <= occupancySizeU );
+    assert( patch.getSizeV0() <= occupancySizeV );
+
+    bool  locationFound = false;
+    auto& occupancy     = patch.getOccupancy();
+
+    while ( !locationFound ) {
+      for ( size_t v = 0; v < occupancySizeV && !locationFound; ++v ) {
+        for ( size_t u = 0; u < occupancySizeU && !locationFound; ++u ) {
+          patch.setU0( u );
+          patch.setV0( v );
+
+          for ( size_t orientationIdx = 0; orientationIdx < numOrientations && !locationFound; orientationIdx++ ) {
+            if ( packingStrategy == 0 )
+              patch.setPatchOrientation( PATCH_ORIENTATION_DEFAULT );
+            else {
+              if ( patch.getSizeU0() > patch.getSizeV0() ) {
+                patch.setPatchOrientation( g_orientationHorizontal[orientationIdx] );
+              } else {
+                patch.setPatchOrientation( g_orientationVertical[orientationIdx] );
+              }
+            }
+            if ( patch.checkFitPatchCanvas( occupancyMap, occupancySizeU, occupancySizeV, params_.lowDelayEncoding_,
+                                            safeguard ) ) {
+              locationFound = true;
+              if ( g_printDetailedInfo ) {
+                std::cout << "Orientation " << patch.getPatchOrientation() << " selected for patch " << patch.getIndex()
+                          << " (" << u << "," << v << ")" << std::endl;
+              }
+            }
+          }
+        }
+      }
+
+      if ( !locationFound ) {
+        occupancySizeV *= 2;
+        occupancyMap.resize( occupancySizeU * occupancySizeV );
+
+        occupancyMapViewport.resize( occupancySizeU * occupancySizeV, -1 );
+      }
+    }
+
+    for ( size_t v0 = 0; v0 < patch.getSizeV0(); ++v0 ) {
+      for ( size_t u0 = 0; u0 < patch.getSizeU0(); ++u0 ) {
+        int coord = patch.patchBlock2CanvasBlock( u0, v0, occupancySizeU, occupancySizeV );
+
+        if ( params_.lowDelayEncoding_ ) {
+          occupancyMap[coord] = true;
+
+          occupancyMapViewport[coord] = patch.getViewId();
+        } else {
+          occupancyMap[coord] = occupancyMap[coord] || occupancy[v0 * patch.getSizeU0() + u0];
+
+          // Could be simplified
+          if (occupancyMapViewport[coord] != -1 && occupancy[v0 * patch.getSizeU0() + u0]) {
+            occupancyMapViewport[coord] = patch.getViewId();
+          } else if (occupancyMapViewport[coord] != -1 && !occupancy[v0 * patch.getSizeU0() + u0]) {
+            occupancyMapViewport[coord] = patch.getViewId();
+          } else if (occupancyMapViewport[coord] == -1 && occupancy[v0 * patch.getSizeU0() + u0]) {
+            occupancyMapViewport[coord] = patch.getViewId();
+          }
+        }
+      }
+    }
+
+    if ( !( patch.isPatchDimensionSwitched() ) ) {
+      // For debugging purpose (TO BE REMOVED)
+      // std::cout << ANSI_COLOR_RED << "Patch dimension is not switched" << ANSI_COLOR_RESET << std::endl;
+
+      height          = (std::max)( height, ( patch.getV0() + patch.getSizeV0() ) * patch.getOccupancyResolution() );
+      maxOccupancyRow = (std::max)( maxOccupancyRow, ( patch.getV0() + patch.getSizeV0() ) );
+    } else {
+      // For debugging purpose (TO BE REMOVED)
+      // std::cout << ANSI_COLOR_RED << "Patch dimension is switched" << ANSI_COLOR_RESET << std::endl;
+
+      height          = (std::max)( height, ( patch.getV0() + patch.getSizeU0() ) * patch.getOccupancyResolution() );
+      maxOccupancyRow = (std::max)( maxOccupancyRow, ( patch.getV0() + patch.getSizeU0() ) );
+    }
+  }
+
+  // Ignore this for now (this is disabled by default)
+  if ( tile.getNumberOfRawPointsPatches() > 0 && !tile.getUseRawPointsSeparateVideo() ) {
+    // For debugging purpose (TO BE REMOVED)
+    std::cout << ANSI_COLOR_RED << "Pack raw points patch" << ANSI_COLOR_RESET << std::endl;
+
+    packRawPointsPatch( tile, occupancyMap, width, height, occupancySizeU, occupancySizeV, maxOccupancyRow );
+  } else {
+    if ( g_printDetailedInfo ) { printMap( occupancyMap, occupancySizeU, occupancySizeV ); }
+  }
+
+  // Ignore this for now (this is disabled by default)
+  if ( params_.enhancedOccupancyMapCode_ && !tile.getUseRawPointsSeparateVideo() ) {
+    // For debugging purpose (TO BE REMOVED)
+    std::cout << ANSI_COLOR_RED << "Pack EOM attribute points patch" << ANSI_COLOR_RESET << std::endl;
+
+    packEOMAttributePointsPatch( tile, occupancyMap, width, height, occupancySizeU, occupancySizeV, maxOccupancyRow );
+  }
+
+  if ( g_printDetailedInfo ) { printMap( occupancyMap, occupancySizeU, occupancySizeV ); }
+
+  // For debugging purpose (TO BE REMOVED)
+  // printMap( occupancyMap, occupancySizeU, occupancySizeV );
+  printMapViewport( occupancyMapViewport, occupancySizeU, occupancySizeV );
+
+  std::cout << "frame " << tile.getFrameIndex() << " tile " << tile.getTileIndex() << " packFlexible: actualImageSize "
+            << width << " x " << height << std::endl;
+}
+
 void PCCEncoder::packMultipleTiles( PCCAtlasFrameContext& atlasFrame, int safeguard ) {
   auto& frame   = atlasFrame.getTitleFrameContext();
   auto& width   = frame.getWidth();
@@ -3709,13 +4029,25 @@ void PCCEncoder::dilateGroupGeometryVideo( PCCContext& context, PCCFrameContext&
     }
   }
 }
+
+/**
+ * @brief Generates an occupancy map (data structure) for each frame.
+ * 
+ * @param context The entire frames are stored inside this context.
+ * @param copyToFrame ?
+ * @return true
+ */
 bool PCCEncoder::generateOccupancyMap( PCCContext& context, bool copyToFrame ) {
   for ( auto& frame : context.getFrames() ) {
+    // Get the occupancy map for each frame
     auto& entireFrame = frame.getTitleFrameContext();
     entireFrame.getOccupancyMap().resize( entireFrame.getWidth() * entireFrame.getHeight(), 0 );
     printf( "generateOccupancyMap frame %zu: entireFrameSize:%zux%zu\n", entireFrame.getFrameIndex(),
             entireFrame.getWidth(), entireFrame.getHeight() );
+
+    // There could be more than one tiles in each frame
     for ( size_t ti = 0; ti < frame.getNumTilesInAtlasFrame(); ti++ ) {
+      // Generate an occupancy map for each tile?
       auto& tile = frame.getTile( ti );
       generateOccupancyMap( tile );
       if ( params_.enhancedOccupancyMapCode_ ) { modifyOccupancyMapEOM( tile ); }
@@ -3736,6 +4068,11 @@ bool PCCEncoder::generateOccupancyMap( PCCContext& context, bool copyToFrame ) {
   return true;
 }
 
+/**
+ * @brief Generates an occupancy map (data structure) given a tile.
+ * 
+ * @param tile ?
+ */
 void PCCEncoder::generateOccupancyMap( PCCFrameContext& tile ) {
   auto& occupancyMap     = tile.getOccupancyMap();
   auto& fullOccupancyMap = tile.getFullOccupancyMap();
@@ -3744,21 +4081,37 @@ void PCCEncoder::generateOccupancyMap( PCCFrameContext& tile ) {
   occupancyMap.resize( width * height, 0 );
   if ( !params_.absoluteD1_ || !params_.absoluteT1_ ) { fullOccupancyMap.resize( width * height, 0 ); }
   for ( auto& patch : tile.getPatches() ) {
+    // Note: u is patch width, and v is patch height
     for ( size_t v = 0; v < patch.getSizeV(); ++v ) {
       for ( size_t u = 0; u < patch.getSizeU(); ++u ) {
         const size_t  p = v * patch.getSizeU() + u;
         const int16_t d = patch.getDepth( 0 )[p];
+
+        // If the cell is occupied, assign a color
+        // TODO: Assign different colors based on viewport
         if ( d < g_infiniteDepth ) { occupancyMap[patch.patch2Canvas( u, v, width, height )] = 1; }
+        // Note: The occupancy map is represented as an array, not a 2D array. So accessing the
+        //       point (x, y) on the map is not as trivial as doing occupancyMap[x][y], instead
+        //       it can be accessed with occupancyMap[y * width + x]. The patch2canvas function
+        //       is a wrapper over this computation.
       }
     }
   }
   if ( !params_.absoluteD1_ || !params_.absoluteT1_ ) { fullOccupancyMap = occupancyMap; }
 }
 
+/**
+ * @brief Refines occupancy map. This function should be executed before
+ *        calling generateOccupancyMap.
+ * 
+ * @param tile ?
+ */
 void PCCEncoder::refineOccupancyMap( PCCFrameContext& tile ) {
   auto&        patches    = tile.getPatches();
   const size_t patchCount = patches.size();
   for ( size_t patchIndex = 0; patchIndex < patchCount; ++patchIndex ) {
+    // Process each patch by setting the depth (presence) for each cell
+    // Note: The heuristic is explained in details in the codec description
     auto& patch = patches[patchIndex];
     // Count number of points in each block 4x4
     if ( params_.occupancyPrecision_ > 1 ) {
@@ -4738,9 +5091,14 @@ bool PCCEncoder::placeSegments( const PCCGroupOfFrames& sources, PCCContext& con
     generateTilesFromImage( context );
   } else {
     if ( params_.numMaxTilePerFrame_ > 1 ) { generateTilesFromSegments( context ); }
+
+    // The default number of tiles is 1
+    // For now we can ignore the case where the number of tiles is more than 1
     for ( size_t tileIdx = 0; tileIdx < params_.numMaxTilePerFrame_; tileIdx++ ) {
       size_t initTileWidth  = context.getFrame( 0 ).getTile( tileIdx ).getWidth();
       size_t initTileHeight = context.getFrame( 0 ).getTile( tileIdx ).getHeight();
+
+      // Process each frame iteratively
       for ( size_t frameIndex = 0; frameIndex < context.size(); frameIndex++ ) {
         if ( sources[frameIndex].getPointCount() == 0u ) { return false; }
         auto&  tile       = context.getFrame( frameIndex ).getTile( tileIdx );
@@ -4752,7 +5110,9 @@ bool PCCEncoder::placeSegments( const PCCGroupOfFrames& sources, PCCContext& con
         if ( params_.occupancyMapRefinement_ ) { refineOccupancyMap( tile ); }
         if ( ( frameIndex == 0 ) || ( !params_.constrainedPack_ ) ) {
           if ( params_.packingStrategy_ < 2 ) {
-            packFlexible( tile, params_.packingStrategy_, tileWidth, tileHeight, params_.safeGuardDistance_,
+            // packFlexible( tile, params_.packingStrategy_, tileWidth, tileHeight, params_.safeGuardDistance_,
+            //               params_.enablePointCloudPartitioning_ );
+            packViewport( tile, params_.packingStrategy_, tileWidth, tileHeight, params_.safeGuardDistance_,
                           params_.enablePointCloudPartitioning_ );
           } else if ( params_.packingStrategy_ == 2 ) {
             packTetris( tile, tileWidth, tileHeight, params_.safeGuardDistance_ );
