@@ -757,7 +757,7 @@ void PCCEncoder::printMap( std::vector<bool> img, const size_t sizeU, const size
 }
 
 /**
- * @brief Prints the occupancy map of a frame.
+ * @brief Prints the occupancy map of a frame, with colors to indicate the projection plane of each patch.
  * 
  * @param img The occupancy map data structure.
  * @param sizeU The width of the occupancy map.
