@@ -215,10 +215,24 @@ class PCCPatch {
                                  size_t       canvasStrideBlk,
                                  size_t       canvasHeightBlk,
                                  const Tile   tile = Tile() ) const;
+  int    patchBlock2RegionBlock( const size_t uBlk,
+                                 const size_t vBlk,
+                                 size_t       regionStrideBlk,
+                                 size_t       regionHeightBlk,
+                                 size_t       canvasStrideBlk,
+                                 const Tile   tile = Tile() ) const;
 
   bool checkFitPatchCanvas( std::vector<bool> canvas,
                             size_t            canvasStrideBlk,
                             size_t            canvasHeightBlk,
+                            bool              bPrecedence,
+                            int               safeguard = 0,
+                            const Tile        tile      = Tile() );
+
+  bool checkFitPatchRegion( std::vector<bool> canvas,
+                            size_t            regionStrideBlk,
+                            size_t            regionHeightBlk,
+                            size_t            canvasStrideBlk,
                             bool              bPrecedence,
                             int               safeguard = 0,
                             const Tile        tile      = Tile() );

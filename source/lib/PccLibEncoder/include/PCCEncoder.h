@@ -273,7 +273,7 @@ class PCCEncoder : public PCCCodec {
                      size_t           frameHeight,
                      int              safeguard                    = 0,
                      bool             enablePointCloudPartitioning = false );
-  void packViewport( PCCFrameContext& tile,
+  void packViewpoint( PCCFrameContext& tile,
                      int              packingStrategy,
                      size_t           frameWidth,
                      size_t           frameHeight,
@@ -450,7 +450,7 @@ class PCCEncoder : public PCCCodec {
 
   //**print out**//
   static void printMap( std::vector<bool> img, const size_t sizeU, const size_t sizeV );
-  static void printMapViewport( std::vector<int> img, const size_t sizeU, const size_t sizeV );
+  static void printMapViewpoint( std::vector<int> img, const size_t sizeU, const size_t sizeV );
   static void printMapTetris( std::vector<bool> img, const size_t sizeU, const size_t sizeV, std::vector<int> horizon );
 
   PCCEncoderParameters params_;

@@ -334,6 +334,99 @@ bool PCCPatch::checkFitPatchCanvas( std::vector<bool> canvas,
   return true;
 }
 
+int PCCPatch::patchBlock2RegionBlock( const size_t uBlk,
+                                      const size_t vBlk,
+                                      size_t       regionStrideBlk,
+                                      size_t       regionHeightBlk,
+                                      size_t       canvasStrideBlk,
+                                      const Tile   tile ) const {
+  // Note: uBlk = width of the patch
+  //       vBlk = height of the patch
+  //       u0_ = leftmost x coordinate of the patch in the occupancy map
+  //       v0_ = topmost y coordinate of the patch in the occupancy map
+  size_t x, y;
+  switch ( patchOrientation_ ) {
+    case PATCH_ORIENTATION_DEFAULT:
+      x = uBlk + u0_;
+      y = vBlk + v0_;
+      break;
+    case PATCH_ORIENTATION_ROT90:
+      x = ( sizeV0_ - 1 - vBlk ) + u0_;
+      y = uBlk + v0_;
+      break;
+    case PATCH_ORIENTATION_ROT180:
+      x = ( sizeU0_ - 1 - uBlk ) + u0_;
+      y = ( sizeV0_ - 1 - vBlk ) + v0_;
+      break;
+    case PATCH_ORIENTATION_ROT270:
+      x = vBlk + u0_;
+      y = ( sizeU0_ - 1 - uBlk ) + v0_;
+      break;
+    case PATCH_ORIENTATION_MIRROR:
+      x = ( sizeU0_ - 1 - uBlk ) + u0_;
+      y = vBlk + v0_;
+      break;
+    case PATCH_ORIENTATION_MROT90:
+      x = ( sizeV0_ - 1 - vBlk ) + u0_;
+      y = ( sizeU0_ - 1 - uBlk ) + v0_;
+      break;
+    case PATCH_ORIENTATION_MROT180:
+      x = uBlk + u0_;
+      y = ( sizeV0_ - 1 - vBlk ) + v0_;
+      break;
+    case PATCH_ORIENTATION_MROT270:
+      x = vBlk + u0_;
+      y = uBlk + v0_;
+      break;
+    case PATCH_ORIENTATION_SWAP:  // swapAxis
+      x = vBlk + u0_;
+      y = uBlk + v0_;
+      break;
+    default: return -1; break;
+  }
+
+  // Check if x and y are within the boundary of the patch's corresponding region
+  if ( x >= regionStrideBlk ) { return -1; }
+  if ( y >= regionHeightBlk ) { return -1; }
+  if ( tile.minU != -1 ) {
+    if ( x < tile.minU ) { return -1; }
+    if ( y < tile.minV ) { return -1; }
+    if ( x > tile.maxU ) { return -1; }
+    if ( y > tile.maxV ) { return -1; }
+  }
+  return int( x + canvasStrideBlk * y );
+}
+
+bool PCCPatch::checkFitPatchRegion( std::vector<bool> canvas,
+                                    size_t            regionStrideBlk,
+                                    size_t            regionHeightBlk,
+                                    size_t            canvasStrideBlk,
+                                    bool              bPrecedence,
+                                    int               safeguard,
+                                    const Tile        tile ) {
+  // Note: sizeU0_ = width of the patch
+  //       sizeV0_ = height of the patch
+  for ( size_t v0 = 0; v0 < sizeV0_; ++v0 ) {
+    for ( size_t u0 = 0; u0 < sizeU0_; ++u0 ) {
+      for ( int deltaY = -safeguard; deltaY < safeguard + 1; deltaY++ ) {
+        for ( int deltaX = -safeguard; deltaX < safeguard + 1; deltaX++ ) {
+          int pos = patchBlock2RegionBlock( u0 + deltaX, v0 + deltaY, regionStrideBlk, regionHeightBlk, canvasStrideBlk, tile );
+          if ( pos < 0 ) {
+            return false;
+          } else {
+            if ( bPrecedence ) {
+              if ( canvas[pos] && occupancy_[u0 + sizeU0_ * v0] ) { return false; }
+            } else {
+              if ( canvas[pos] ) { return false; }
+            }
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 bool PCCPatch::smallerRefFirst( const PCCPatch& rhs ) {
   if ( bestMatchIdx_ == -1 && rhs.getBestMatchIdx() == -1 ) {
     return gt( rhs );
