@@ -2613,7 +2613,7 @@ void PCCEncoder::packViewpoint( PCCFrameContext& tile,
     }
   }
 
-  // Set the width of the occupancy map to its preset width (also accounts for the user-specified resolution)
+  // Set the width of the occupancy map to its preset width (also accounts for the user-specified occupancy resolution)
   size_t occupancySizeU = presetWidth / params_.occupancyResolution_;
   // If the largest patch is wider than the occupancy map, update the width of the occupancy map
   for ( auto& patch : patches ) { occupancySizeU = (std::max)( occupancySizeU, patch.getSizeU0() + 1 ); }
@@ -2676,14 +2676,10 @@ void PCCEncoder::packViewpoint( PCCFrameContext& tile,
   auto regionStride = [ &regionSizeU ]( size_t patchViewId ) { return ( patchViewId % 3 + 1 ) * regionSizeU; };
   auto regionHeight = [ &regionSizeV, &occupancySizeV ]( size_t patchViewId ) { return ( patchViewId < 3 ) ? regionSizeV : occupancySizeV; };
 
-  // Used in checkFitPatchRegion and patchBlock2RegionBlock
-  // size_t regionStrideBlk[6] = { regionSizeU, 2 * regionSizeU, 3 * regionSizeU, regionSizeU, 2 * regionSizeU, 3 * regionSizeU };
-  // size_t regionHeightBlk[6] = { regionV0[3], regionV0[4], regionV0[5], occupancySizeV, occupancySizeV, occupancySizeV };
-
   std::vector<bool> occupancyMap;
   occupancyMap.resize( occupancySizeU * occupancySizeV, false );
 
-  // This is used for pretty printing the occupancy map
+  // Used for pretty printing the occupancy map
   std::vector<int> occupancyMapViewpoint;
   occupancyMapViewpoint.resize( occupancySizeU * occupancySizeV, -1 );
 
@@ -2718,22 +2714,6 @@ void PCCEncoder::packViewpoint( PCCFrameContext& tile,
                           << " (" << u << "," << v << ")" << std::endl;
               }
             }
-
-            // Need to re-assign since the height of the patch can change
-            // regionHeightBlk[0] = regionV0[3];
-            // regionHeightBlk[1] = regionV0[4];
-            // regionHeightBlk[2] = regionV0[5];
-            // regionHeightBlk[3] = occupancySizeV;
-            // regionHeightBlk[4] = occupancySizeV;
-            // regionHeightBlk[5] = occupancySizeV;
-
-            // if ( patch.checkFitPatchRegion( occupancyMap, regionStrideBlk[patch.getViewId()], regionHeightBlk[patch.getViewId()], occupancySizeU, params_.lowDelayEncoding_, safeguard ) ) {
-            //   locationFound = true;
-            //   if ( g_printDetailedInfo ) {
-            //     std::cout << "Orientation " << patch.getPatchOrientation() << " selected for patch " << patch.getIndex()
-            //               << " (" << u << "," << v << ")" << std::endl;
-            //   }
-            // }
           }
         }
       }
@@ -2757,15 +2737,6 @@ void PCCEncoder::packViewpoint( PCCFrameContext& tile,
 
     for ( size_t v0 = 0; v0 < patch.getSizeV0(); v0++ ) {
       for ( size_t u0 = 0; u0 < patch.getSizeU0(); u0++ ) {
-        // Need to re-assign since the height of the patch can change
-        // regionHeightBlk[0] = regionV0[3];
-        // regionHeightBlk[1] = regionV0[4];
-        // regionHeightBlk[2] = regionV0[5];
-        // regionHeightBlk[3] = occupancySizeV;
-        // regionHeightBlk[4] = occupancySizeV;
-        // regionHeightBlk[5] = occupancySizeV;
-
-        // int coord = patch.patchBlock2RegionBlock( u0, v0, regionStrideBlk[patch.getViewId()], regionHeightBlk[patch.getViewId()], occupancySizeU );
         int coord = patch.patchBlock2RegionBlock( u0, v0, regionStride( patch.getViewId() ), regionHeight( patch.getViewId() ), occupancySizeU );
 
         if ( params_.lowDelayEncoding_ ) {
@@ -2811,7 +2782,7 @@ void PCCEncoder::packViewpoint( PCCFrameContext& tile,
   // Print the occupancy map (for debugging purpose)
   printMapViewpoint( occupancyMapViewpoint, occupancySizeU, occupancySizeV );
 
-  // Update the width and height of the occupancy map so that it scales well with the user-specified resolution
+  // Update the width and height of the occupancy map so that it scales well with the user-specified occupancy resolution
   width = (std::max)( width, occupancySizeU * params_.occupancyResolution_ );
   height = (std::max)( height, occupancySizeV * params_.occupancyResolution_ );
 }
